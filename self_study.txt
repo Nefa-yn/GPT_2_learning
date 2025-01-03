@@ -8,4 +8,4 @@
     nn.Embedding(https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html#torch.nn.Embedding) - This module is often used to store word embeddings and retrieve them using indices,
     nn.LayerNorm(https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html#torch.nn.LayerNorm) - Applies Layer Normalization over a mini-batch of inputs,
     nn.Linear(https://pytorch.org/docs/stable/generated/torch.nn.Linear.html#torch.nn.Linear) - Applies an affine linear transformation to the incoming data
-
+    nn.GELU(https://pytorch.org/docs/stable/generated/torch.nn.GELU.html#torch.nn.GELU) - Activation function
