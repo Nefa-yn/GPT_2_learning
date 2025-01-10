@@ -109,9 +109,9 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         # forward the final layer norm and the classifier
-        for block in self.transformer.ln_f(x):
-            logits = self.lm_head(x) # (B, T, vocab_size)
-            return logits
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x) # (B, T, vocab_size)
+        return logits
     
     @classmethod
     def from_pretrained(cls, model_type):
