@@ -109,6 +109,7 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         # forward the final layer norm and the classifier
+        # INVESTIGATE: uncovered strange behaviour after applying normalixzation tensor.mean() close to 0.5 when expected close to 0, tensor.std() closeto 8 when expected close to 1
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
         return logits
@@ -166,10 +167,18 @@ class GPT(nn.Module):
 
 num_return_sequences = 5
 max_length = 30
+device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    device = 'mps'
+print(f'usnig: {device}')
 
-model = GPT.from_pretrained('gpt2')
+
+#model = GPT.from_pretrained('gpt2')
+model = GPT(GPTConfig())
 model.eval()
-model.to('mps')
+model.to(device)
 #print('didnt crash')
 
 # prefix tokens
