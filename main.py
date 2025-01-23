@@ -96,7 +96,7 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_emb, config.vocab_size, bias=False)#final classifier
     
-    def forward(self, idx):
+    def forward(self, idx, targets = None):
         # idx is of shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, f'Cannot forward sequence to length {T}, block size is {self.config.block_size}'
@@ -112,7 +112,10 @@ class GPT(nn.Module):
         # INVESTIGATE: uncovered strange behaviour after applying normalixzation tensor.mean() close to 0.5 when expected close to 0, tensor.std() closeto 8 when expected close to 1
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
-        return logits
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
     
     @classmethod
     def from_pretrained(cls, model_type):
@@ -164,7 +167,37 @@ class GPT(nn.Module):
         return model
     
 # ----------------------------------------------
+import tiktoken
 
+class DataLoaderLight:
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+        with open('input.txt','r') as file:
+            text = file.read()
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f'loaded tokens : {len(tokens)}')
+        print(f'1 epoch = {len(tokens) // (B*T)} batches')
+
+        #state
+        self.current_position = 0
+    
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = self.tokens[self.current_position : self.current_position + B*T+1]
+        x = (buf[:-1]).view(B,T)#inputs
+        y = (buf[1:]).view(B,T)#target
+        # advance position in a tensor
+        self.current_position += B * T
+        # if loading next batch would be out of bounds, reset
+        if self.current_position + (B*T+1) > len(self.tokens):
+            self.current_position = 0
+        return x, y
+
+# ----------------------------------------------
+ 
 num_return_sequences = 5
 max_length = 30
 device = 'cpu'
@@ -173,12 +206,28 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     device = 'mps'
 print(f'usnig: {device}')
+# device = 'cpu'
 
+#get a data batch
 
-#model = GPT.from_pretrained('gpt2')
+train_loader = DataLoaderLight(B=4, T=32)
+#get logits
 model = GPT(GPTConfig())
-model.eval()
 model.to(device)
+
+#optimize
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+for i in range(50):
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    print(f'step {i}, loss : {loss.item()}')
+
+print(loss)
+import sys; sys.exit(0)
 #print('didnt crash')
 
 # prefix tokens
