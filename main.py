@@ -14,6 +14,7 @@ class CasualSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_emb, 3 * config.n_emb)
         # output projection
         self.c_proj = nn.Linear(config.n_emb, config.n_emb)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
         # regularization
         self.n_head = config.n_head
         self.n_emb = config.n_emb
@@ -49,6 +50,8 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_emb, 4 * config.n_emb)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_emb, config.n_emb)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -95,7 +98,24 @@ class GPT(nn.Module):
             ln_f = nn.LayerNorm(config.n_emb),#final layer norm
         ))
         self.lm_head = nn.Linear(config.n_emb, config.vocab_size, bias=False)#final classifier
-    
+
+        #weigth sharing scheme
+        self.transformer.wte.weigth = self.lm_head.weight
+        
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std *= (2 * self.config.n_layer) ** -0.5
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+
     def forward(self, idx, targets = None):
         # idx is of shape (B, T)
         B, T = idx.size()
@@ -206,9 +226,8 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     device = 'mps'
 print(f'usnig: {device}')
-# device = 'cpu'
 
-#get a data batch
+torch.manual_seed(1337)
 
 train_loader = DataLoaderLight(B=4, T=32)
 #get logits
