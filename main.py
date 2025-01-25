@@ -217,7 +217,8 @@ class DataLoaderLight:
         return x, y
 
 # ----------------------------------------------
- 
+import time 
+
 num_return_sequences = 5
 max_length = 30
 device = 'cpu'
@@ -229,7 +230,10 @@ print(f'usnig: {device}')
 
 torch.manual_seed(1337)
 
-train_loader = DataLoaderLight(B=4, T=32)
+train_loader = DataLoaderLight(B=4, T=1024)
+
+torch.set_float32_matmul_precision('high')
+
 #get logits
 model = GPT(GPTConfig())
 model.to(device)
@@ -237,13 +241,20 @@ model.to(device)
 #optimize
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):
+    t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
+        #mport code; code.interact(local=locals())
     loss.backward()
     optimizer.step()
-    print(f'step {i}, loss : {loss.item()}')
+    torch.mps.synchronize()
+    t1 = time.time()
+    delta_t = (t1 - t0) * 1000 # time diff  in miliseconds
+    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
+    print(f'step {i}, loss : {loss.item()}, time_delta: {delta_t}, tokens per second: {tokens_per_sec}')
 
 print(loss)
 import sys; sys.exit(0)
