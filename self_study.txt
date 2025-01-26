@@ -10,4 +10,7 @@
     nn.Linear(https://pytorch.org/docs/stable/generated/torch.nn.Linear.html#torch.nn.Linear) - Applies an affine linear transformation to the incoming data
     nn.GELU(https://pytorch.org/docs/stable/generated/torch.nn.GELU.html#torch.nn.GELU) - Activation function
     torch.arange(https://pytorch.org/docs/stable/generated/torch.arange.html#torch-arange) - Returns a 1-D tensor of size 
+
+2. Papers:
+Attention is all you need (https://arxiv.org/pdf/1706.03762) - Fundamental paper in transformers and attention
     
