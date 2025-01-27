@@ -33,10 +33,13 @@ class CasualSelfAttention(nn.Module):
         q = q.view(B,T, self.n_head, C // self.n_head).transpose(1,2)#(B, T, nh, hs)
         v = v.view(B,T, self.n_head, C // self.n_head).transpose(1,2)#(B, T, nh, hs)
         # attention (materializes the large (T,T)   matrix for all the queries and keys)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
-        y = att @ v #(B, T, nh, hs) x (B, T, nh, hs) -> (B, T, nh, hs)
+
+        # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        # att = F.softmax(att, dim=-1)
+        # y = att @ v #(B, T, nh, hs) x (B, T, nh, hs) -> (B, T, nh, hs)
+
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True) 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
         y = self.c_proj(y)
@@ -237,6 +240,10 @@ torch.set_float32_matmul_precision('high')
 #get logits
 model = GPT(GPTConfig())
 model.to(device)
+    # TODO Not working on MPS thing to research
+    # import torch._dynamo
+    # torch._dynamo.config.suppress_errors = True
+    # model = torch.compile(model)
 
 #optimize
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -254,7 +261,7 @@ for i in range(50):
     t1 = time.time()
     delta_t = (t1 - t0) * 1000 # time diff  in miliseconds
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f'step {i}, loss : {loss.item()}, time_delta: {delta_t}, tokens per second: {tokens_per_sec}')
+    print(f'step {i}, loss : {loss.item()}, time_delta: {delta_t:.2f}, tokens per second: {tokens_per_sec:.2f}')
 
 print(loss)
 import sys; sys.exit(0)
