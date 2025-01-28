@@ -38,7 +38,7 @@ class CasualSelfAttention(nn.Module):
         # att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
         # att = F.softmax(att, dim=-1)
         # y = att @ v #(B, T, nh, hs) x (B, T, nh, hs) -> (B, T, nh, hs)
-
+        # Flash Attention implementation
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True) 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
@@ -238,16 +238,33 @@ train_loader = DataLoaderLight(B=4, T=1024)
 torch.set_float32_matmul_precision('high')
 
 #get logits
-model = GPT(GPTConfig())
+model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)
     # TODO Not working on MPS thing to research
     # import torch._dynamo
     # torch._dynamo.config.suppress_errors = True
     # model = torch.compile(model)
 
+max_lr = 6e-4
+min_lr = max_lr * 0.1
+warmup_steps = 10
+max_steps = 50
+def get_lr(it):
+    # linear warmup for warmup_iters steps
+    if it < warmup_steps:
+        return max_lr * (it+1) / warmup_steps
+    # if it > lr_decay_iters, return min lr
+    if it > max_steps:
+        return min_lr
+    # in between use cosine decay down to min lr
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <=1
+    coef = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coef starts at 1 goes to 0
+    return min_lr + coef * (max_lr - min_lr)
+
 #optimize
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-for i in range(50):
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+for step in range(max_steps):
     t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
@@ -256,12 +273,16 @@ for i in range(50):
         logits, loss = model(x, y)
         #mport code; code.interact(local=locals())
     loss.backward()
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     optimizer.step()
     torch.mps.synchronize()
     t1 = time.time()
     delta_t = (t1 - t0) * 1000 # time diff  in miliseconds
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f'step {i}, loss : {loss.item()}, time_delta: {delta_t:.2f}, tokens per second: {tokens_per_sec:.2f}')
+    print(f'step {step}, loss : {loss.item()} | norm : {norm:.4f} | lr : {lr:.4e} | time_delta: {delta_t:.2f} ms | tokens per second: {tokens_per_sec:.2f}')
 
 print(loss)
 import sys; sys.exit(0)
