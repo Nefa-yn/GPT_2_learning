@@ -257,7 +257,15 @@ print(f'usnig: {device}')
 
 torch.manual_seed(1337)
 
-train_loader = DataLoaderLight(B=4, T=1024)
+total_batch_size = 524288
+B = 4
+T = 1024
+assert total_batch_size % (B * T) == 0 , 'make sure total batch size devisible by B * T'
+grad_acum_steps = total_batch_size // (B * T)
+print(f'Total batch size is: {total_batch_size}')
+print(f'Calculated gradient accumulation steps: {grad_acum_steps}')
+
+train_loader = DataLoaderLight(B=B, T=T)
 
 torch.set_float32_matmul_precision('high')
 
@@ -291,13 +299,17 @@ def get_lr(it):
 optimizer = model.configure_optimizers(weight_decay = 0.1, learning_rate= 6e-4, device = device)
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-        logits, loss = model(x, y)
-        #mport code; code.interact(local=locals())
-    loss.backward()
+    loss_accume = 0.0
+    for micro_step in range(grad_acum_steps):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
+            #mport code; code.interact(local=locals())
+        loss = loss / grad_acum_steps #to add mean reduction
+        loss_accume += loss.detach()
+        loss.backward()
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     lr = get_lr(step)
     for param_group in optimizer.param_groups:
@@ -305,9 +317,10 @@ for step in range(max_steps):
     optimizer.step()
     torch.mps.synchronize()
     t1 = time.time()
-    delta_t = (t1 - t0) * 1000 # time diff  in miliseconds
-    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f'step {step}, loss : {loss.item()} | norm : {norm:.4f} | lr : {lr:.4e} | time_delta: {delta_t:.2f} ms | tokens per second: {tokens_per_sec:.2f}')
+    delta_t = (t1 - t0) # time diff  in seconds
+    tokens_processed = train_loader.B * train_loader.T * grad_acum_steps
+    tokens_per_sec =  tokens_processed / delta_t
+    print(f'step {step}, loss : {loss_accume.item():.6f} | norm : {norm:.4f} | lr : {lr:.4e} | time_delta: {delta_t:.2f} s | tokens per second: {tokens_per_sec:.2f}')
 
 print(loss)
 import sys; sys.exit(0)
