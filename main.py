@@ -245,15 +245,34 @@ class DataLoaderLight:
 
 # ----------------------------------------------
 import time 
+import os
+from torch.distributed import init_process_group, destroy_process_group
 
 num_return_sequences = 5
 max_length = 30
-device = 'cpu'
-if torch.cuda.is_available():
-    device = 'cuda'
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-    device = 'mps'
-print(f'usnig: {device}')
+
+ddp = int(os.environ.get('RANK', -1)) != -1# is this a ddp run?
+if ddp:
+    #use DDP atm demands CUDA, we set device apropriately acording to rank
+    assert torch.cuda.is_available(), "For ddp CUDA is required"
+    init_process_group(backend="nccl")
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+    device = f'cuda:{ddp_local_rank}'
+    torch.cuda.set_device(device)
+    master_process = ddp_rank == 0# this proces will do logging, checkpointing, etc
+else:
+    ddp_rank = 0
+    ddp_local_rank = 0
+    world_size = 1
+    master_process = True
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = 'mps'
+    print(f'usnig: {device}')
 
 torch.manual_seed(1337)
 
