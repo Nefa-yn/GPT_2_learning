@@ -270,8 +270,7 @@ import time
 import os
 from torch.distributed import init_process_group, destroy_process_group
 
-num_return_sequences = 5
-max_length = 30
+
 
 ddp = int(os.environ.get('RANK', -1)) != -1# is this a ddp run?
 if ddp:
@@ -308,6 +307,8 @@ if master_process:
     print(f'Calculated gradient accumulation steps: {grad_acum_steps}')
 
 train_loader = DataLoaderLight(B=B, T=T, process_rank = ddp_rank, num_processes = ddp_world_size, split='train')
+val_loader = DataLoaderLight(B=B, T=T, process_rank = ddp_rank, num_processes = ddp_world_size, split='val')
+
 
 torch.set_float32_matmul_precision('high')
 
@@ -345,6 +346,68 @@ def get_lr(it):
 optimizer = raw_model.configure_optimizers(weight_decay = 0.1, learning_rate= 6e-4, device = device)
 for step in range(max_steps):
     t0 = time.time()
+
+    if step % 100 == 0:
+        model.eval()
+        val_loader.reset()
+        with torch.no_grad():
+            val_loss_accum = 0.0
+            val_loss_steps = 20
+            for _ in range(val_loss_steps):
+                x, y = val_loader.next_batch()
+                x, y = x.to(device), y.to(device)
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                logits, loss = model(x, y)
+            loss = loss / val_loss_steps
+            val_loss_accum += loss.detach()
+        if ddp:
+            dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+        if master_process:
+            print(f'valiadtion loss: {val_loss_accum.item():.4f}')
+
+    if step % 100 == 0 and step > 0:
+        model.eval()
+        import tiktoken
+
+        num_return_sequences = 5
+        max_length = 30
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode('Hello, I`m a language model,')
+        tokens = torch.tensor(tokens,dtype= torch.long)
+        tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1)
+
+        x = tokens.to('mps')
+
+        # generate! right now x is (B, T) where B = 5, T = 8
+        # set seed to 42
+        torch.manual_seed(42)
+        torch.cuda.manual_seed(42)
+        while x.size(1) < max_length:
+            # forward the model to get logits
+            with torch.no_grad():
+                logits = model(x) # (B, T, vocab_size)
+                # take the logits at a last position
+                logits = logits[:, -1, :] # (B, vocab_size)
+                # get probabilities
+                probs = F.softmax(logits, dim=-1)
+                # do top-k sampling of 50 (huggingface pipeline default)
+                # topk_probs here become (5, 50) , topk_indices is (5, 50)
+                topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+                # select a token from the top-k probs
+                ix = torch.multinomial(topk_probs, 1) # (B, 1)
+                # gather the coresponding indices
+                xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
+                # append to the sequence
+                x = torch.cat((x, xcol), dim=1)
+
+        # print the generated text
+        for i in range(num_return_sequences):
+            tokens = x[i, :max_length].tolist()
+            decode = enc.decode(tokens)
+            print(f'rank {ddp_rank}, sample {i}: ', decode)
+
+
+    model.train()
     optimizer.zero_grad()
     loss_accume = 0.0
     for micro_step in range(grad_acum_steps):
@@ -379,38 +442,4 @@ if ddp:
 import sys; sys.exit(0)
 #print('didnt crash')
 
-# prefix tokens
-import tiktoken
-enc = tiktoken.get_encoding('gpt2')
-tokens = enc.encode('Hello, I`m a language model,')
-tokens = torch.tensor(tokens,dtype= torch.long)
-tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1)
-x = tokens.to('mps')
 
-# generate! right now x is (B, T) where B = 5, T = 8
-# set seed to 42
-torch.manual_seed(42)
-torch.cuda.manual_seed(42)
-while x.size(1) < max_length:
-    # forward the model to get logits
-    with torch.no_grad():
-        logits = model(x) # (B, T, vocab_size)
-        # take the logits at a last position
-        logits = logits[:, -1, :] # (B, vocab_size)
-        # get probabilities
-        probs = F.softmax(logits, dim=-1)
-        # do top-k sampling of 50 (huggingface pipeline default)
-        # topk_probs here become (5, 50) , topk_indices is (5, 50)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-        # select a token from the top-k probs
-        ix = torch.multinomial(topk_probs, 1) # (B, 1)
-        # gather the coresponding indices
-        xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
-        # append to the sequence
-        x = torch.cat((x, xcol), dim=1)
-
-# print the generated text
-for i in range(num_return_sequences):
-    tokens = x[i, :max_length].tolist()
-    decode = enc.decode(tokens)
-    print('>', decode)
