@@ -376,16 +376,18 @@ for step in range(max_steps):
         tokens = torch.tensor(tokens,dtype= torch.long)
         tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1)
 
-        x = tokens.to('mps')
+        xgen = tokens.to(device)
+
 
         # generate! right now x is (B, T) where B = 5, T = 8
         # set seed to 42
-        torch.manual_seed(42)
+        sample_rng = torch.Generator(device=device)
+        sample_rng.manual_seed(42 +ddp_rank)
         torch.cuda.manual_seed(42)
-        while x.size(1) < max_length:
+        while xgen.size(1) < max_length:
             # forward the model to get logits
             with torch.no_grad():
-                logits = model(x) # (B, T, vocab_size)
+                logits = model(xgen) # (B, T, vocab_size)
                 # take the logits at a last position
                 logits = logits[:, -1, :] # (B, vocab_size)
                 # get probabilities
@@ -394,15 +396,15 @@ for step in range(max_steps):
                 # topk_probs here become (5, 50) , topk_indices is (5, 50)
                 topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
                 # select a token from the top-k probs
-                ix = torch.multinomial(topk_probs, 1) # (B, 1)
+                ix = torch.multinomial(topk_probs, 1, generator=sample_rng) # (B, 1)
                 # gather the coresponding indices
                 xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
                 # append to the sequence
-                x = torch.cat((x, xcol), dim=1)
+                x = torch.cat((xgen, xcol), dim=1)
 
         # print the generated text
         for i in range(num_return_sequences):
-            tokens = x[i, :max_length].tolist()
+            tokens = xgen[i, :max_length].tolist()
             decode = enc.decode(tokens)
             print(f'rank {ddp_rank}, sample {i}: ', decode)
 
