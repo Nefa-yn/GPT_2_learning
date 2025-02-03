@@ -524,7 +524,6 @@ for step in range(max_steps):
 
 if ddp:
     destroy_process_group()
-import sys; sys.exit(0)
 #print('didnt crash')
 
 
