@@ -13,7 +13,9 @@
 
 2. Papers:
 Attention is all you need (https://arxiv.org/pdf/1706.03762) - Fundamental paper in transformers and attention
-    
+
+3. Videos:
+Detailed explanation for NN concepts (https://www.youtube.com/@statquest) - Wathed full course on Neural networks
 
 3. Problems:
 
