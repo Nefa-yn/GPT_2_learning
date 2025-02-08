@@ -16,10 +16,3 @@ Attention is all you need (https://arxiv.org/pdf/1706.03762) - Fundamental paper
 
 3. Videos:
 Detailed explanation for NN concepts (https://www.youtube.com/@statquest) - Wathed full course on Neural networks
-
-4. Problems:
-
-# TODO Not working on MPS thing to research
-# import torch._dynamo
-# torch._dynamo.config.suppress_errors = True
-# model = torch.compile(model)
